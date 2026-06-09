@@ -10190,7 +10190,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "config", "cron", "curator", "dashboard", "debug", "doctor",
         "dump", "fallback", "gateway", "hooks", "import", "insights",
         "gui", "desktop", "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate",
-        "model", "pairing", "plugins", "portal", "postinstall", "profile", "proxy",
+        "model", "pairing", "plugins", "portal", "postinstall", "profile", "prompts", "proxy",
         "prompt-size",
         "send", "sessions", "setup",
         "skills", "slack", "status", "tools", "uninstall", "update",
@@ -10893,6 +10893,14 @@ def main():
 
     kanban_parser = _build_kanban_parser(subparsers)
     kanban_parser.set_defaults(func=cmd_kanban)
+
+    # =========================================================================
+    # prompts command — Canopy-backed prompt profile management
+    # =========================================================================
+    from hermes_cli.prompts import build_prompts_parser, prompts_command
+
+    prompts_parser = build_prompts_parser(subparsers)
+    prompts_parser.set_defaults(func=prompts_command)
 
     # =========================================================================
     # hooks command — shell-hook inspection and management
