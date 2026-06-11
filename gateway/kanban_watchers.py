@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -21,6 +22,52 @@ from typing import Any, Optional
 # Match the logger run.py uses (logging.getLogger(__name__) where __name__ ==
 # "gateway.run") so extracted log records keep their original logger name.
 logger = logging.getLogger("gateway.run")
+
+
+def _trim_words(text: str, max_words: int) -> str:
+    words = str(text or "").strip().split()
+    if len(words) <= max_words:
+        return " ".join(words)
+    return " ".join(words[:max_words]).rstrip(".,;:") + "…"
+
+
+def _kanban_blocked_digest(task_id: str, title: str, assignee: Optional[str], reason: str) -> str:
+    """Return a Telegram-mobile blocker digest under ~150 words."""
+    clean_title = _trim_words(title, 14)
+    clean_reason = _trim_words(reason or "Worker requested review", 58)
+    owner = f"@{assignee}" if assignee else "unassigned"
+    msg = (
+        f"🚧 Blocker: {task_id}\n"
+        f"Task: {clean_title}\n"
+        f"Owner: {owner}\n"
+        f"Issue: {clean_reason}\n"
+        "Next: tap a button below."
+    )
+    # Last-resort hard cap. Keeps pathological titles/reasons from becoming
+    # unreadable Telegram walls while preserving the action line.
+    words = msg.split()
+    if len(words) > 150:
+        msg = " ".join(words[:147]).rstrip(".,;:") + "…"
+    return msg
+
+
+def _kanban_blocker_keyboard_metadata(board: str, task_id: str) -> dict[str, Any]:
+    """Telegram inline-keyboard metadata for actionable blocked cards."""
+    safe_board = re.sub(r"[^A-Za-z0-9_.-]", "", board or "default") or "default"
+    safe_task = task_id if re.fullmatch(r"t_[A-Za-z0-9]+", task_id or "") else ""
+    if not safe_task:
+        return {}
+    return {
+        "telegram_inline_keyboard": [
+            [
+                {"text": "✅ Promote", "callback_data": f"kbp:p:{safe_board}:{safe_task}"},
+                {"text": "⏭ Keep blocked", "callback_data": f"kbp:s:{safe_board}:{safe_task}"},
+            ],
+            [
+                {"text": "Open board", "callback_data": f"kbp:o:{safe_board}:{safe_task}"},
+            ],
+        ]
+    }
 
 
 class GatewayKanbanWatchersMixin:
@@ -267,8 +314,10 @@ class GatewayKanbanWatchersMixin:
                         elif kind == "blocked":
                             reason = ""
                             if ev.payload and ev.payload.get("reason"):
-                                reason = f": {str(ev.payload['reason'])[:160]}"
-                            msg = f"⏸ {tag}Kanban {sub['task_id']} blocked{reason}"
+                                reason = str(ev.payload["reason"])
+                            msg = _kanban_blocked_digest(
+                                sub["task_id"], title, who, reason,
+                            )
                         elif kind == "gave_up":
                             err = ""
                             if ev.payload and ev.payload.get("error"):
@@ -295,6 +344,8 @@ class GatewayKanbanWatchersMixin:
                         metadata: dict[str, Any] = {}
                         if sub.get("thread_id"):
                             metadata["thread_id"] = sub["thread_id"]
+                        if kind == "blocked" and platform_str == "telegram":
+                            metadata.update(_kanban_blocker_keyboard_metadata(board_slug or "default", sub["task_id"]))
                         sub_key = (
                             sub["task_id"], sub["platform"],
                             sub["chat_id"], sub.get("thread_id") or "",
