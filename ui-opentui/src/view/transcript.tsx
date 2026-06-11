@@ -43,9 +43,12 @@
  * BOTTOM_ALWAYS_MOUNTED of the transcript or streaming (live rows paint
  * instantly with zero added latency); a row created deep in a bulk snapshot
  * (resume `commitSnapshot`) starts as an ESTIMATE spacer — a resumed 2k
- * session mounts only the bottom window. While a mouse selection is live the
- * window FREEZES (no swaps — a swap would destroy highlighted renderables out
- * from under the native selection walk).
+ * session mounts only the bottom window. While a mouse selection is being
+ * DRAGGED the window FREEZES (no swaps — a swap would destroy highlighted
+ * renderables out from under the native selection walk); once the drag
+ * finishes, the persisting highlight only PINS the rows containing selected
+ * renderables (highlight + later Ctrl+C copy stay exact) so a streaming turn
+ * can't balloon the mounted set behind a lingering selection.
  *
  * Spacer corrections (S2, the zero-jank rule): when a remount/measure lands a
  * height different from what the spacer occupied, the wrapper's onSizeChange
@@ -75,7 +78,11 @@
  *
  * Known S2 limits (documented, deferred): /compact·/details toggles and width
  * resizes leave out-of-window spacer heights stale until remount or the idle
- * march (resize invalidation is S3, design §5).
+ * march (resize invalidation is S3, design §5). A discrete scroll jump larger
+ * than the margin in one frame remounts a mis-estimated row already inside
+ * the viewport — the in-viewport correction is forbidden (jank rule), so that
+ * single user-caused frame absorbs the estimate error (the design's accepted
+ * "remounted for view" path).
  */
 import type { BoxRenderable, ScrollBoxRenderable } from '@opentui/core'
 import { useRenderer } from '@opentui/solid'
@@ -183,8 +190,10 @@ export function Transcript(props: { store: SessionStore }) {
   // anything deeper (a bulk resume snapshot) starts as an estimate spacer.
   const defaults = new Map<number, boolean>()
   // key → the row's live measuring wrapper (the idle measure pull below reads
-  // post-layout heights for batch rows whose mount changed nothing).
+  // post-layout heights for batch rows whose mount changed nothing); and the
+  // reverse map (wrapper → key) for pinning rows under a persisting selection.
   const wrappers = new Map<number, BoxRenderable>()
+  const wrapperKeys = new WeakMap<object, number>()
   // key → cached settled-row height estimate (estimateFor scans the row text —
   // caching keeps the per-append adjudication O(rows), not O(text)). Tagged
   // with the /compact flag it was computed under.
@@ -245,12 +254,35 @@ export function Transcript(props: { store: SessionStore }) {
   const tick = (force = false): void => {
     const sb = scroll()
     if (!sb) return
-    // Selection freeze: the native selection walks the LIVE tree — swapping a
-    // row out (destroying its renderables) mid-selection would corrupt the
-    // highlight/copy. Frozen ≠ broken: unseen new rows default to mounted.
-    if (renderer.getSelection()?.isActive) {
+    // Selection handling (S2 refinement of the S1 full freeze):
+    //  - while DRAGGING, the native selection walks the LIVE tree on every
+    //    update — swapping a row out (destroying its renderables) mid-walk
+    //    would corrupt the highlight/copy. Full freeze, as in S1.
+    //  - a FINISHED highlight persists by design (boundary/renderer.ts keeps
+    //    it so Ctrl+C can re-copy). An indefinite full freeze would let a
+    //    burst-streaming turn balloon the mounted set (the S1 hole this slice
+    //    closes), so instead only the rows that CONTAIN selected renderables
+    //    are pinned (never windowed) — the highlight and a later Ctrl+C copy
+    //    stay exact, and everything else keeps windowing.
+    const selection = renderer.getSelection()
+    if (selection?.isActive && selection.isDragging) {
       lastActivityAt = Date.now()
       return
+    }
+    const pinned = new Set<number>()
+    if (selection?.isActive) {
+      lastActivityAt = Date.now() // a live highlight is activity: no idle pulses
+      for (const renderable of selection.selectedRenderables) {
+        let node: unknown = renderable
+        while (node && typeof node === 'object') {
+          const key = wrapperKeys.get(node)
+          if (key !== undefined) {
+            pinned.add(key)
+            break
+          }
+          node = (node as { parent?: unknown }).parent
+        }
+      }
     }
     const viewportHeight = sb.viewport.height
     if (viewportHeight <= 0) return
@@ -303,7 +335,7 @@ export function Transcript(props: { store: SessionStore }) {
         // here (the override lives in component-local signals — toolPart.tsx/
         // reasoningPart.tsx); expanded rows far above the viewport may
         // re-collapse on remount. Accepted for S1.
-        neverWindow: (message.streaming ?? false) || (running && i === messages.length - 1)
+        neverWindow: (message.streaming ?? false) || (running && i === messages.length - 1) || pinned.has(key)
       }
     })
     // Pinned to the bottom (sticky region): anchor the window to the content
@@ -428,6 +460,7 @@ export function Transcript(props: { store: SessionStore }) {
         ref={el => {
           wrapper = el
           wrappers.set(key, el)
+          wrapperKeys.set(el, key)
         }}
         style={{ flexDirection: 'column', flexShrink: 0 }}
         onSizeChange={record}

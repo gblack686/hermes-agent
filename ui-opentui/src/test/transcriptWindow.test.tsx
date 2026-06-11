@@ -196,6 +196,47 @@ describe('transcript windowing — S2 append-time adjudication', () => {
   }, 120_000)
 })
 
+describe('transcript windowing — S2 selection: drag freezes, a finished highlight only pins its rows', () => {
+  test('a persisting (finished) selection does not freeze windowing; its rows stay mounted for copy', async () => {
+    const store = seedRows(60)
+    const on = await mountTranscript(store, '1')
+    try {
+      // drag-select across a visible row's TEXT line (rows interleave with
+      // margin lines — find one from the frame), then release — the highlight
+      // PERSISTS by design (boundary/renderer.ts keeps it so Ctrl+C re-copies).
+      const textY = on.probe
+        .frame()
+        .split('\n')
+        .findIndex(line => line.includes('marker'))
+      expect(textY).toBeGreaterThanOrEqual(0)
+      await on.probe.mouse.drag(3, textY, 30, textY + 2)
+      await on.probe.settle()
+      const selection = on.probe.renderer.getSelection()
+      expect(selection?.isActive).toBe(true)
+      expect(selection?.isDragging).toBe(false)
+      const copied = selection?.getSelectedText() ?? ''
+      expect(copied).toContain('marker')
+
+      // burst 300 appends while the highlight lingers: windowing must keep
+      // adjudicating (the S1 full freeze would balloon the mounted set)…
+      resetWindowRowStats()
+      for (let i = 0; i < 300; i++) {
+        store.pushSystem(`late-${i} marker`)
+        if (i % 50 === 49) await on.probe.settle()
+      }
+      for (let i = 0; i < 6; i++) await on.probe.settle()
+      expect(windowRowStats().peakMounted).toBeLessThan(120)
+
+      // …while the selected row — long scrolled out past the margin — stays
+      // PINNED: the highlight's renderables are alive and Ctrl+C still copies
+      // the exact same text.
+      expect(on.probe.renderer.getSelection()?.getSelectedText()).toBe(copied)
+    } finally {
+      on.probe.destroy()
+    }
+  }, 60_000)
+})
+
 describe('transcript windowing — S2 windowed resume (commitSnapshot)', () => {
   function snapshot(n: number): Message[] {
     const out: Message[] = []

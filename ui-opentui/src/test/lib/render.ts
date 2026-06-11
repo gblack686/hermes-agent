@@ -59,6 +59,10 @@ export interface RenderProbe {
   readonly scroll: (x: number, y: number, direction: 'up' | 'down') => Promise<void>
   /** The mock keyboard (typeText / pressArrow / pressEnter / …) — pair with `settle()`. */
   readonly keys: TestRendererSetup['mockInput']
+  /** The full mock mouse (drag / pressDown / release / …) — selection tests. */
+  readonly mouse: TestRendererSetup['mockMouse']
+  /** The live test renderer (e.g. `getSelection()` assertions). */
+  readonly renderer: TestRendererSetup['renderer']
   /** Run a render pass + flush so simulated input lands in the next `frame()`. */
   readonly settle: () => Promise<void>
   readonly destroy: () => void
@@ -104,6 +108,8 @@ export async function renderProbe(
       await setup.flush()
     },
     keys: setup.mockInput,
+    mouse: setup.mockMouse,
+    renderer: setup.renderer,
     settle: async () => {
       await setup.renderOnce()
       await setup.flush()
