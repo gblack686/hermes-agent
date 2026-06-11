@@ -1,9 +1,11 @@
 /**
  * window.ts — pure transcript-windowing math (design: docs/plans/
- * opentui-transcript-windowing.md, slice S1). Table-tests the window calc
+ * opentui-transcript-windowing.md, slices S1+S2). Table-tests the window calc
  * (viewport ± margin intersection over cumulative exact heights), the
  * hysteresis recompute gate, the never-window / bottom-K rules, the
- * null-height estimate fallback, and the correction-legality jank rule.
+ * null-height estimate fallback, the correction-legality jank rule, the S2
+ * pinned-bottom (append-time) anchoring, the idle edge-measure batch picker,
+ * the idle-delay knob, and the DEV mounted-row counters.
  */
 import { describe, expect, test } from 'vitest'
 
@@ -11,9 +13,16 @@ import type { Message } from '../logic/store.ts'
 import {
   computeWindow,
   correctionIsLegal,
+  DEFAULT_MEASURE_IDLE_MS,
+  edgeMeasureBatch,
   estimateMessageHeight,
   hysteresisFor,
+  measureIdleDelayMs,
+  noteRowMounted,
+  noteRowUnmounted,
+  resetWindowRowStats,
   shouldRecompute,
+  windowRowStats,
   type WindowRow
 } from '../logic/window.ts'
 
@@ -115,6 +124,68 @@ describe('computeWindow — viewport ± margin intersection', () => {
     const result = computeWindow({ rows, scrollTop: 60, viewportHeight: 30, margin: 0 })
     // window [60, 90) → only 'b' ([50, 100)) intersects
     expect([...result.mounted]).toEqual(['b'])
+  })
+})
+
+describe('computeWindow — pinnedBottom (S2 append-time anchoring)', () => {
+  test('anchors the window to the content BOTTOM regardless of a stale scrollTop', () => {
+    // 100 rows × 10 → content 1000; viewport 40, margin 40. scrollTop is a
+    // STALE 0 (layout lagging a burst append), but pinnedBottom anchors to
+    // 1000 − 40 = 960 → window [920, 1040) → rows 92..99.
+    const result = computeWindow({
+      rows: uniform(100, 10),
+      scrollTop: 0,
+      viewportHeight: 40,
+      margin: 40,
+      pinnedBottom: true
+    })
+    expect(mountedKeys(result)).toEqual([92, 93, 94, 95, 96, 97, 98, 99])
+    expect(result.anchor).toBe(960)
+  })
+
+  test('appended rows past the margin become spacers without any scroll movement', () => {
+    // The append-time rule: grow 100 → 200 rows at the same stale scrollTop —
+    // the window slides to the NEW bottom; the old bottom rows fall out.
+    const before = computeWindow({
+      rows: uniform(100, 10),
+      scrollTop: 0,
+      viewportHeight: 40,
+      margin: 40,
+      pinnedBottom: true
+    })
+    const after = computeWindow({
+      rows: uniform(200, 10),
+      scrollTop: 0,
+      viewportHeight: 40,
+      margin: 40,
+      pinnedBottom: true
+    })
+    expect(before.mounted.has(99)).toBe(true)
+    expect(after.mounted.has(99)).toBe(false)
+    expect(after.mounted.has(199)).toBe(true)
+  })
+
+  test('short content (fits the viewport) clamps to scrollTop 0 → everything mounted', () => {
+    const result = computeWindow({
+      rows: uniform(3, 10),
+      scrollTop: 0,
+      viewportHeight: 40,
+      margin: 40,
+      pinnedBottom: true
+    })
+    expect(result.mounted.size).toBe(3)
+    expect(result.anchor).toBe(0)
+  })
+
+  test('estimates participate in the bottom anchoring (never-measured history)', () => {
+    // 5 estimate-only rows of 100 above 5 exact rows of 10 → content 550;
+    // viewport 40, margin 0 → window [510, 550) → only the exact bottom rows.
+    const rows = [
+      ...Array.from({ length: 5 }, (_, i) => row(i, null, { estimate: 100 })),
+      ...Array.from({ length: 5 }, (_, i) => row(5 + i, 10))
+    ]
+    const result = computeWindow({ rows, scrollTop: 0, viewportHeight: 40, margin: 0, pinnedBottom: true })
+    expect(mountedKeys(result)).toEqual([6, 7, 8, 9])
   })
 })
 
@@ -233,5 +304,72 @@ describe('estimateMessageHeight — line-count estimate for never-mounted rows',
   test('a pathological wall of text is clamped', () => {
     const text = Array.from({ length: 10_000 }, (_, i) => `l${i}`).join('\n')
     expect(estimateMessageHeight({ text }, { top: 0, bottom: 0 }, 0)).toBeLessThanOrEqual(500)
+  })
+
+  test('chips: settled non-system rows count the ⧉ copy line; system rows do not', () => {
+    const spacing0 = { top: 0, bottom: 0 }
+    expect(estimateMessageHeight({ role: 'user', text: 'hi' }, spacing0, 1, true)).toBe(2)
+    expect(estimateMessageHeight({ role: 'system', text: 'note' }, spacing0, 1, true)).toBe(1)
+    expect(estimateMessageHeight({ role: 'user', text: 'hi' }, spacing0, 1, false)).toBe(1)
+    // parts: one chip line per text block, none for tool headers
+    const message: Pick<Message, 'text' | 'parts'> = {
+      text: '',
+      parts: [
+        { type: 'text', id: 'p1', text: 'one\ntwo' },
+        { type: 'tool', id: 't1', name: 'terminal', state: 'complete' }
+      ]
+    }
+    // (2 text + 1 chip) + 1 tool + 1 gap
+    expect(estimateMessageHeight(message, spacing0, 1, true)).toBe(5)
+  })
+})
+
+describe('edgeMeasureBatch — the S2 idle measure picker', () => {
+  test('picks never-measured, unmounted rows nearest the bottom first', () => {
+    const rows = [row(0, null), row(1, null), row(2, 10), row(3, null), row(4, 10)]
+    expect(edgeMeasureBatch(rows, new Set<number>([4]), 10)).toEqual([3, 1, 0])
+  })
+
+  test('respects the batch size (the march is incremental)', () => {
+    const rows = Array.from({ length: 20 }, (_, i) => row(i, null))
+    expect(edgeMeasureBatch(rows, new Set<number>(), 3)).toEqual([19, 18, 17])
+  })
+
+  test('skips mounted, measured, and never-window rows', () => {
+    const rows = [row(0, null), row(1, null, { neverWindow: true }), row(2, null), row(3, 7)]
+    expect(edgeMeasureBatch(rows, new Set<number>([2]), 10)).toEqual([0])
+  })
+
+  test('fully measured transcript → nothing to do', () => {
+    expect(edgeMeasureBatch(uniform(5, 10), new Set<number>(), 10)).toEqual([])
+  })
+})
+
+describe('measureIdleDelayMs — the idle-pulse knob', () => {
+  test('unset/garbage → the 1s default; integers (incl. 0) parse', () => {
+    expect(measureIdleDelayMs(undefined)).toBe(DEFAULT_MEASURE_IDLE_MS)
+    expect(measureIdleDelayMs('soon')).toBe(DEFAULT_MEASURE_IDLE_MS)
+    expect(measureIdleDelayMs('-5')).toBe(DEFAULT_MEASURE_IDLE_MS)
+    expect(measureIdleDelayMs('0')).toBe(0)
+    expect(measureIdleDelayMs(' 250 ')).toBe(250)
+  })
+})
+
+describe('windowRowStats — the DEV mounted-row counters', () => {
+  test('tracks current and peak; reset re-bases the peak on the live count', () => {
+    resetWindowRowStats()
+    const base = windowRowStats().mounted
+    noteRowMounted()
+    noteRowMounted()
+    noteRowMounted()
+    expect(windowRowStats().mounted).toBe(base + 3)
+    expect(windowRowStats().peakMounted).toBe(base + 3)
+    noteRowUnmounted()
+    expect(windowRowStats().mounted).toBe(base + 2)
+    expect(windowRowStats().peakMounted).toBe(base + 3) // peak is sticky
+    resetWindowRowStats()
+    expect(windowRowStats().peakMounted).toBe(base + 2) // re-based, live rows kept
+    noteRowUnmounted()
+    noteRowUnmounted()
   })
 })

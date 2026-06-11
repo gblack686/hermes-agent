@@ -1,5 +1,5 @@
 /**
- * Transcript windowing S1 — headless integration (view/transcript.tsx +
+ * Transcript windowing S1+S2 — headless integration (view/transcript.tsx +
  * logic/window.ts behind HERMES_TUI_WINDOWING). Proves, against the REAL
  * renderer tree:
  *   - out-of-window rows are actually UNMOUNTED (far fewer live renderables
@@ -7,24 +7,39 @@
  *   - spacers are EXACT-height (total scrollHeight identical ON vs OFF — the
  *     zero-jank invariant),
  *   - scrolling far away REMOUNTS spaced-out rows (content paints again),
- *   - the flag OFF renders the legacy tree (no wrappers, everything mounted).
+ *   - the flag OFF renders the legacy tree (no wrappers, everything mounted),
+ * and the S2 slices:
+ *   - append-time adjudication: bursting 1500 appends keeps the PEAK
+ *     simultaneously-mounted row count bounded (< 120) — rows scrolled past
+ *     the margin become spacers without a manual scroll,
+ *   - resume (commitSnapshot): a bulk snapshot mounts only the bottom window;
+ *     everything above starts as estimate spacers and remounts on scroll-back,
+ *   - the idle exact-measure march + spacer corrections are ZERO-JANK: with
+ *     wrong estimates (soft-wrapped rows), idle pulses fix spacer heights
+ *     while the visible frame stays byte-identical — sticky-bottom pinning
+ *     compensates when pinned, explicit scrollTop compensation when reading
+ *     mid-history.
  */
 import { ScrollBoxRenderable, type Renderable } from '@opentui/core'
 import { useRenderer } from '@opentui/solid'
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { createSessionStore } from '../logic/store.ts'
+import { createSessionStore, type Message } from '../logic/store.ts'
+import { resetWindowRowStats, windowRowStats } from '../logic/window.ts'
 import { ThemeProvider } from '../view/theme.tsx'
 import { Transcript } from '../view/transcript.tsx'
 import { renderProbe, type RenderProbe } from './lib/render.ts'
 
 type Store = ReturnType<typeof createSessionStore>
 
-const ENV_KEY = 'HERMES_TUI_WINDOWING'
-const envBefore = process.env[ENV_KEY]
+const ENV_KEYS = ['HERMES_TUI_WINDOWING', 'HERMES_TUI_WINDOW_IDLE_MS'] as const
+const envBefore = ENV_KEYS.map(k => process.env[k])
 afterEach(() => {
-  if (envBefore === undefined) delete process.env[ENV_KEY]
-  else process.env[ENV_KEY] = envBefore
+  ENV_KEYS.forEach((k, i) => {
+    const v = envBefore[i]
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  })
 })
 
 /** Seed `n` settled one-line system rows (flat text — no async markdown). */
@@ -47,7 +62,7 @@ interface Mounted {
 }
 
 async function mountTranscript(store: Store, windowing: '1' | '0'): Promise<Mounted> {
-  process.env[ENV_KEY] = windowing
+  process.env.HERMES_TUI_WINDOWING = windowing
   let root: Renderable | undefined
   function Grab() {
     root = useRenderer().root
@@ -123,4 +138,174 @@ describe('transcript windowing (HERMES_TUI_WINDOWING) — S1 machinery', () => {
       on.probe.destroy()
     }
   })
+})
+
+// ── S2 — append-time adjudication + windowed resume + idle exact-measure ──
+
+/** Drop the right-most columns (scrollbar territory): corrections legitimately
+ *  resize the thumb as estimates become exact — that is NOT content movement. */
+function clipScrollbar(frame: string): string {
+  return frame
+    .split('\n')
+    .map(line => line.slice(0, -2).replace(/\s+$/, ''))
+    .join('\n')
+}
+
+describe('transcript windowing — S2 append-time adjudication', () => {
+  test('bursting 1500 appends keeps the peak mounted-row count bounded (< 120)', async () => {
+    const onStore = createSessionStore()
+    onStore.apply({ type: 'gateway.ready' })
+    const on = await mountTranscript(onStore, '1')
+    try {
+      resetWindowRowStats()
+      // Burst: 100 appends per frame — the per-append adjudication must window
+      // rows out as they pass the margin, NOT wait for the next frame tick.
+      for (let i = 0; i < 1500; i++) {
+        onStore.pushSystem(i % 5 === 4 ? `row-${i} marker\nsecond line\nthird line` : `row-${i} marker`)
+        if (i % 100 === 99) await on.probe.settle()
+      }
+      for (let i = 0; i < 6; i++) await on.probe.settle()
+      expect(windowRowStats().peakMounted).toBeLessThan(120)
+      // pinned at the bottom: the tail painted (live rows mount instantly)
+      expect(on.probe.frame()).toContain('row-1499 marker')
+
+      // ZERO-JANK INVARIANT survives the burst: spacers (measured or
+      // estimated — these rows never soft-wrap) occupy EXACTLY the height the
+      // full tree would. (The store cap trims both to the same 1000 rows.)
+      const offStore = createSessionStore()
+      offStore.apply({ type: 'gateway.ready' })
+      for (let i = 0; i < 1500; i++) {
+        offStore.pushSystem(i % 5 === 4 ? `row-${i} marker\nsecond line\nthird line` : `row-${i} marker`)
+      }
+      const off = await mountTranscript(offStore, '0')
+      try {
+        expect(on.scrollbox().scrollHeight).toBe(off.scrollbox().scrollHeight)
+      } finally {
+        off.probe.destroy()
+      }
+
+      // scroll-to-top remounts burst rows that were never painted
+      const sb = on.scrollbox()
+      sb.scrollTo(0)
+      for (let i = 0; i < 6; i++) await on.probe.settle()
+      // the cap kept the newest 1000 rows → the oldest surviving row is 500
+      expect(on.probe.frame()).toContain('row-500 marker')
+    } finally {
+      on.probe.destroy()
+    }
+  }, 120_000)
+})
+
+describe('transcript windowing — S2 windowed resume (commitSnapshot)', () => {
+  function snapshot(n: number): Message[] {
+    const out: Message[] = []
+    for (let i = 0; i < n; i++) {
+      if (i % 3 === 0) out.push({ role: 'user', text: `question-${i} marker` })
+      else if (i % 3 === 1) out.push({ role: 'assistant', text: `answer-${i} marker\nwith a second line` })
+      else out.push({ role: 'system', text: `note-${i} marker` })
+    }
+    return out
+  }
+
+  test('a bulk snapshot mounts only the bottom window; history starts as estimate spacers', async () => {
+    const store = createSessionStore()
+    store.apply({ type: 'gateway.ready' })
+    const on = await mountTranscript(store, '1')
+    try {
+      resetWindowRowStats()
+      store.hydrate(() => snapshot(600))
+      for (let i = 0; i < 6; i++) await on.probe.settle()
+      // Only the bottom window (+ bottom-30 sticky region) ever mounted — the
+      // 600-row snapshot must NOT transiently mount everything.
+      expect(windowRowStats().peakMounted).toBeLessThan(120)
+      expect(on.probe.frame()).toContain('answer-598 marker')
+
+      // estimate spacers above are exact for these unwrapped rows (incl. the
+      // ⧉ copy chip line on settled user/assistant rows) — scrollHeight
+      // matches the fully-mounted legacy tree.
+      const offStore = createSessionStore()
+      offStore.apply({ type: 'gateway.ready' })
+      const off = await mountTranscript(offStore, '0')
+      try {
+        offStore.hydrate(() => snapshot(600))
+        for (let i = 0; i < 6; i++) await off.probe.settle()
+        expect(on.scrollbox().scrollHeight).toBe(off.scrollbox().scrollHeight)
+      } finally {
+        off.probe.destroy()
+      }
+
+      // scroll-back into never-mounted history remounts it
+      on.scrollbox().scrollTo(0)
+      for (let i = 0; i < 6; i++) await on.probe.settle()
+      expect(on.probe.frame()).toContain('question-0 marker')
+    } finally {
+      on.probe.destroy()
+    }
+  }, 60_000)
+})
+
+describe('transcript windowing — S2 idle exact-measure + zero-jank corrections', () => {
+  // Every 4th row soft-wraps (~120 chars at width 50): the line-count estimate
+  // is WRONG (1 line vs 3), so the idle march must correct spacer heights —
+  // without ever moving visible content.
+  function wrappySeed(n: number): Store {
+    const store = createSessionStore()
+    store.apply({ type: 'gateway.ready' })
+    const long = 'wrap '.repeat(24).trim() // ~119 chars → 3 wrapped lines
+    for (let i = 0; i < n; i++) store.pushSystem(i % 4 === 0 ? `row-${i} ${long}` : `row-${i} marker`)
+    return store
+  }
+
+  // 400 rows: the mount itself runs ~10 frames (≈100 rows measured by the
+  // march before the baseline is captured) — enough unmeasured, wrongly-
+  // estimated history must REMAIN above for the assertions to bite.
+  const WRAPPY_ROWS = 400
+
+  test('pinned at the bottom: sticky pinning absorbs above-viewport corrections (frame is byte-stable)', async () => {
+    process.env.HERMES_TUI_WINDOW_IDLE_MS = '0' // pulse every idle frame
+    const on = await mountTranscript(wrappySeed(WRAPPY_ROWS), '1')
+    try {
+      const sb = on.scrollbox()
+      const before = clipScrollbar(on.probe.frame())
+      const shBefore = sb.scrollHeight
+      // idle pulses march up the history, mounting+measuring 10 rows at a time
+      for (let i = 0; i < 50; i++) {
+        await on.probe.settle()
+        expect(clipScrollbar(on.probe.frame())).toBe(before) // ZERO jank, every pulse
+      }
+      // corrections actually happened: the wrapped rows were under-estimated
+      expect(sb.scrollHeight).toBeGreaterThan(shBefore)
+      // ...and converged to the legacy tree's exact total
+      const off = await mountTranscript(wrappySeed(WRAPPY_ROWS), '0')
+      try {
+        expect(sb.scrollHeight).toBe(off.scrollbox().scrollHeight)
+      } finally {
+        off.probe.destroy()
+      }
+    } finally {
+      on.probe.destroy()
+    }
+  }, 120_000)
+
+  test('reading mid-history: above-viewport corrections compensate scrollTop in the same frame', async () => {
+    process.env.HERMES_TUI_WINDOW_IDLE_MS = '0'
+    const on = await mountTranscript(wrappySeed(WRAPPY_ROWS), '1')
+    try {
+      const sb = on.scrollbox()
+      // leave the sticky pin and park mid-history (estimates above AND below)
+      sb.scrollTo(Math.floor(sb.scrollHeight / 2))
+      for (let i = 0; i < 6; i++) await on.probe.settle() // window remount settles
+      const baseline = clipScrollbar(on.probe.frame())
+      const scrollTopBefore = sb.scrollTop
+      for (let i = 0; i < 50; i++) {
+        await on.probe.settle()
+        expect(clipScrollbar(on.probe.frame())).toBe(baseline) // ZERO jank
+      }
+      // the under-estimated rows ABOVE the viewport grew; scrollTop was
+      // compensated by exactly that growth — that's WHY the frame held still.
+      expect(sb.scrollTop).toBeGreaterThan(scrollTopBefore)
+    } finally {
+      on.probe.destroy()
+    }
+  }, 120_000)
 })

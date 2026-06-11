@@ -990,6 +990,11 @@ export function createSessionStore(options?: SessionStoreOptions) {
     // briefly hands the full fetched history to <For>. Pre-slicing guarantees
     // resuming ANY session mounts at most MESSAGE_CAP rows. (Events buffered
     // across the resume RPC, replayed below, self-cap via capMessages per push.)
+    // With windowing ON (HERMES_TUI_WINDOWING — view/transcript.tsx S2) the
+    // view mounts only the BOTTOM window of this snapshot anyway: rows created
+    // deep in a bulk replace start as line-count-estimate spacers and are
+    // measured lazily. The pre-slice still bounds the windowing-OFF path and
+    // the store's own JS retention.
     const capped = snapshot.length > MESSAGE_CAP ? snapshot.slice(-MESSAGE_CAP) : snapshot
     setState('messages', capped)
     // A resume is a fresh view → SET (not accumulate) the dropped count to what the
