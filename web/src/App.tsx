@@ -53,6 +53,7 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Typography } from "@/components/NouiTypography";
 import { cn } from "@/lib/utils";
 import { Backdrop } from "@/components/Backdrop";
+import { useSidebarStatus } from "@/hooks/useSidebarStatus";
 import {
   CommandLayerOverlay,
   type CommandLayerAction,
@@ -797,7 +798,7 @@ export default function App() {
               </div>
             </div>
 
-            <SidebarFooter />
+            <SidebarFooter status={useSidebarStatus()} />
           </aside>
 
           <PageHeaderProvider pluginTabs={pluginTabMeta}>
@@ -978,7 +979,7 @@ function SidebarSystemActions({ onNavigate }: { onNavigate: () => void }) {
         {t.app.system}
       </span>
 
-      <SidebarStatusStrip />
+      <SidebarStatusStrip status={useSidebarStatus()} />
 
       <ul className="flex flex-col">
         {items.map(({ action, icon: Icon, label, runningLabel, spin }) => {
