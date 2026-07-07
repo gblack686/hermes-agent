@@ -307,3 +307,65 @@ def _unseen_terminal_events_for(tid, chat_id):
         return events
     finally:
         conn.close()
+
+
+def test_blocked_notification_includes_actionable_telegram_options(tmp_path, monkeypatch):
+    """Blocked events should carry a concise message plus Telegram buttons."""
+    db_path = tmp_path / "blocked-actions.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="needs human input", assignee="builder")
+        kb.add_notify_sub(conn, task_id=tid, platform="telegram", chat_id="chat-1")
+        assert kb.block_task(conn, tid, reason="pick the release owner")
+    finally:
+        conn.close()
+
+    adapter = RecordingAdapter()
+    runner = _make_runner(adapter)
+    asyncio.run(_run_one_notifier_tick(monkeypatch, runner))
+
+    assert len(adapter.sent) == 1
+    sent = adapter.sent[0]
+    assert tid in sent["text"]
+    assert "needs human input" in sent["text"]
+    lines = sent["text"].splitlines()
+    assert lines[0].startswith("🚫 Blocked - needs human input")
+    assert lines[1] == "Issue: pick the release owner."
+    assert "Reason:" not in sent["text"]
+    assert "blocked" not in lines[1].lower().replace("unblocked", "")
+    assert lines[2] == "Unblock: add missing context, then promote"
+    assert "  B) " not in lines[2]
+    assert all("Board:" not in line for line in lines)
+    assert f"default · {tid} · owner builder · source kanban-gateway" in sent["text"]
+    assert "pick the release owner" in sent["text"]
+    keyboard = sent["metadata"].get("telegram_inline_keyboard")
+    labels = [button["text"] for row in keyboard for button in row]
+    assert labels[:3] == ["✅ Unblock", "🚀 Promote", "⏸ Keep blocked"]
+    assert any(button.get("callback_data", "").startswith("kbb:u:") for row in keyboard for button in row)
+    assert any(button.get("callback_data", "").startswith("kbb:p:") for row in keyboard for button in row)
+    assert any(button.get("callback_data", "").startswith("kbb:k:") for row in keyboard for button in row)
+
+
+def test_blocked_notification_maps_known_blocker_to_ab_suggestions(tmp_path, monkeypatch):
+    db_path = tmp_path / "blocked-auth.db"
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(db_path))
+    kb.init_db()
+
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="refresh oauth", assignee="builder")
+        kb.add_notify_sub(conn, task_id=tid, platform="telegram", chat_id="chat-1")
+        assert kb.block_task(conn, tid, reason="auth token expired for profile")
+    finally:
+        conn.close()
+
+    adapter = RecordingAdapter()
+    asyncio.run(_run_one_notifier_tick(monkeypatch, _make_runner(adapter)))
+
+    text = adapter.sent[0]["text"]
+    assert "Issue: auth token expired for profile." in text
+    assert "Unblock: A) Reauth the profile with a known-good credential.  B) Sync the approved token, then unblock." in text
+    assert "Board:" not in text
