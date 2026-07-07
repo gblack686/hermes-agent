@@ -3213,3 +3213,150 @@ code { font-size: 0.875rem; }
   }
 }
 
+
+/* --- Live Fleet surface (WS-G, additive; reuses existing brand palette) --- */
+.receipt-banner {
+  align-items: center;
+}
+.receipt-banner .receipt-topline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.receipt-freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--theme-font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(25, 25, 25, 0.14);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  color: rgba(25, 25, 25, 0.62);
+  background: rgba(255, 255, 255, 0.5);
+}
+.receipt-freshness .dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+}
+.receipt-freshness.fresh .dot {
+  background: var(--color-success);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.22);
+}
+.receipt-freshness.stale .dot {
+  background: var(--color-warning);
+}
+.receipt-freshness.old .dot {
+  background: var(--color-destructive);
+}
+.receipt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+.receipt-meta code {
+  font-family: var(--theme-font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: rgba(25, 25, 25, 0.7);
+  border: 1px solid rgba(25, 25, 25, 0.12);
+  background: rgba(255, 255, 255, 0.44);
+  padding: 0.22rem 0.45rem;
+  border-radius: 4px;
+}
+.fleet-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.fleet-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid #d6d4c8;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  color: rgba(25, 25, 25, 0.7);
+}
+.fleet-search input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.82rem;
+  color: #191919;
+  min-width: 12rem;
+}
+.fleet-tenant-chips {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.fleet-tenant-chips button {
+  font-family: var(--theme-font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid #d6d4c8;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  color: rgba(25, 25, 25, 0.62);
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+.fleet-tenant-chips button:hover,
+.fleet-tenant-chips button.is-active {
+  border-color: #d97757;
+  color: #191919;
+}
+.fleet-count {
+  margin-left: auto;
+  font-family: var(--theme-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(25, 25, 25, 0.5);
+}
+.live-profile-card {
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+}
+.live-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.live-profile-card h3 {
+  margin: 0;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.05rem;
+  line-height: 1.1;
+  color: #191919;
+  letter-spacing: 0;
+}
+.live-status {
+  font-family: var(--theme-font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(25, 25, 25, 0.55);
+}
+.live-status-active {
+  color: #2f7048;
+}
+.fleet-skills .library-tag-row {
+  margin-top: 1rem;
+}
+.fleet-empty {
+  color: rgba(25, 25, 25, 0.6);
+  font-size: 0.9rem;
+  padding: 1rem;
+}

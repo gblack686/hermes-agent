@@ -78,6 +78,7 @@ import GbAutomationReposPage from "@/pages/GbAutomationReposPage";
 import { KanbanPage, LangfusePage, SupabasePage } from "@/pages/SupabaseIndexesPage";
 import ProfilesPage, { ProfileDetailPage } from "@/pages/ProfilesPage";
 import SkillsPage from "@/pages/SkillsPage";
+import LiveFleetPage from "@/pages/LiveFleetPage";
 import PluginsPage from "@/pages/PluginsPage";
 import ChatPage from "@/pages/ChatPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -129,6 +130,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/plugins": PluginsPage,
   "/profiles": ProfilesPage,
   "/profiles/:profileId": ProfileDetailPage,
+  "/live-fleet": LiveFleetPage,
   "/overview": GbAutomationOverviewPage,
   "/repos": GbAutomationReposPage,
   "/supabase": SupabasePage,
@@ -194,6 +196,7 @@ const GB_AUTOMATION_NAV: NavItem[] = [
   { path: "/plugins", label: "Plugins", icon: Puzzle },
   { path: "/artifacts", label: "Artifacts", icon: FileText },
   { path: "/profiles", label: "Profiles", icon: Users },
+  { path: "/live-fleet", label: "Live Fleet", icon: RadioTower },
 ];
 
 const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {

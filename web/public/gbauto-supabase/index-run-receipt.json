@@ -1,0 +1,23 @@
+{
+  "artifact_sha256": "a0c6c5f0bb5c8e2031b2008061c74c64ab4114137c2baa552d3cefbceb4291e0",
+  "content_hash": "624a172e5b255ca406c6310f35320829e64bb00a06a1687eff6120aef3aaf9f0",
+  "feed_counts": {
+    "agent_profile_skills": 3572,
+    "agent_profile_teams": 0,
+    "agent_profiles": 44
+  },
+  "indexed_at": "2026-07-07T00:47:52.886121+00:00",
+  "run_counts": {
+    "profile_count": 44,
+    "route_count": 0,
+    "skill_count": 3572,
+    "team_count": 0
+  },
+  "run_id": "9a93aa9459688ba32dcfe56f",
+  "run_tenant_counts": {
+    "gbautomation": 44
+  },
+  "schema_version": "gbauto-fleet-feeds.v1",
+  "source": "live-mini",
+  "validation_status": "pass"
+}

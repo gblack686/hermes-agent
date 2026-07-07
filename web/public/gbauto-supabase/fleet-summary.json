@@ -1,0 +1,22 @@
+{
+  "counts": {
+    "agent_profile_skills": 3572,
+    "agent_profile_teams": 0,
+    "agent_profiles": 44
+  },
+  "provider_counts": {
+    "openai-codex": 44
+  },
+  "skill_source_counts": {
+    "live-mini": 3572
+  },
+  "source_counts": {
+    "live-mini": 44
+  },
+  "status_counts": {
+    "active": 44
+  },
+  "tenant_counts": {
+    "gbautomation": 44
+  }
+}
