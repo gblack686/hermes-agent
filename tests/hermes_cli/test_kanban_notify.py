@@ -16,6 +16,9 @@ def kanban_home(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("HERMES_KANBAN_HOME", str(home))
+    monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     # Allow the kanban notifier path-validator to upload artifacts the
     # tests write under ``tmp_path``. Without this, every artifact-delivery
@@ -218,7 +221,7 @@ async def test_notifier_second_blocked_delivers(kanban_home):
             timeout=10.0,
         )
 
-    blocked_deliveries = [m for m in delivered_msgs if "blocked" in m]
+    blocked_deliveries = [m for m in delivered_msgs if "blocked" in m.lower()]
     assert "second block" not in blocked_deliveries[0]
     assert "second block" in blocked_deliveries[1]
     assert len(blocked_deliveries) == 2, (
