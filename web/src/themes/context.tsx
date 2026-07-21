@@ -82,6 +82,8 @@ function paletteVars(palette: ThemePalette): Record<string, string> {
     ...layerVars("background", palette.background),
     ...layerVars("midground", palette.midground),
     ...layerVars("foreground", palette.foreground),
+    "--warm-glow": palette.warmGlow,
+    "--noise-opacity-mul": String(palette.noiseOpacity),
   };
 }
 
@@ -347,6 +349,7 @@ function applyFontOverride(fontId: string | undefined) {
 function applyTheme(theme: DashboardTheme) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  root.dataset.hermesTheme = theme.name;
 
   // Clear any overrides from a previous theme before applying the new set.
   for (const cssVar of ALL_OVERRIDE_VARS) {
@@ -411,8 +414,8 @@ function applyTheme(theme: DashboardTheme) {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   /** Name of the currently active theme (built-in id or user YAML name). */
   const [themeName, setThemeName] = useState<string>(() => {
-    if (typeof window === "undefined") return "default";
-    const stored = window.localStorage.getItem(STORAGE_KEY) ?? "default";
+    if (typeof window === "undefined") return "gbautomation";
+    const stored = window.localStorage.getItem(STORAGE_KEY) ?? "gbautomation";
     const migrated = migrateThemeName(stored);
     // Write the migrated name back so future reads converge on the new
     // key and we eventually retire the alias entry.
