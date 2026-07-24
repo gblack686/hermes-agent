@@ -1,29 +1,44 @@
 name: Docs Site Checks
-
-on:
-  workflow_call:
-
 permissions:
   contents: read
-
 jobs:
   docs-site-checks:
     name: Build docs site
-    uses: gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d
     permissions:
       contents: read
-    with:
-      repo_profile: gblack686-hermes-agent
-      language: mixed
-      python_versions: '["3.11"]'
-      node_versions: '["22"]'
-      actionlint_enabled: false
-      required_check_alias: Build docs site
-      install_command: |
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      REPO_PROFILE: gblack686-hermes-agent
+      LANGUAGE_HINT: mixed
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: package-lock.json
+    - name: Install dependencies
+      run: |-
         npm ci --prefix website
         python -m pip install ascii-guard==2.3.0 pyyaml==6.0.3
-      build_command: |
+    - name: Run build command
+      run: |-
         python3 website/scripts/extract-skills.py
         python3 website/scripts/generate-skill-docs.py
         npm --prefix website run lint:diagrams
         npm --prefix website run build
+'on':
+  workflow_call: null

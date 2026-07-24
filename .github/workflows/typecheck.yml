@@ -1,49 +1,66 @@
-# .github/workflows/typecheck.yml
 name: Typecheck
-
-on:
-  workflow_call:
-
 permissions:
   contents: read
-
 jobs:
   typecheck:
     name: Check TypeScript
-    uses: gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d
     permissions:
       contents: read
-    with:
-      repo_profile: gblack686-hermes-agent
-      language: node
-      python_versions: '[]'
-      node_versions: '["22"]'
-      actionlint_enabled: false
-      required_check_alias: Check TypeScript
-      install_command: npm ci --ignore-scripts
-      test_command: |
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      REPO_PROFILE: gblack686-hermes-agent
+      LANGUAGE_HINT: node
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: package-lock.json
+    - name: Install dependencies
+      run: npm ci --ignore-scripts
+    - name: Run test command
+      run: |-
         set -euo pipefail
         for package in ui-tui web apps/bootstrap-installer apps/desktop apps/shared; do
           npm run --prefix "$package" typecheck
         done
-
-  # Production build of the desktop renderer. `typecheck` runs `tsc` only,
-  # which does NOT exercise Vite/Rolldown module resolution — so an
-  # unresolvable package export (e.g. a transitive @assistant-ui/tap that no
-  # longer exports "./react-shim") slips past typecheck and only explodes when
-  # users build apps/desktop from source on install/update. Run the real
-  # `vite build` here so that class of break fails in CI instead.
   desktop-build:
     name: Build desktop app
-    uses: gbauto/gbautomation/.github/workflows/reusable-pr-gate.yml@5bcb4f40e0dc65d5c5f838bbd16794bda185940d
     permissions:
       contents: read
-    with:
-      repo_profile: gblack686-hermes-agent
-      language: node
-      python_versions: '[]'
-      node_versions: '["22"]'
-      actionlint_enabled: false
-      required_check_alias: Build desktop app
-      install_command: npm ci
-      build_command: npm run --prefix apps/desktop build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      REPO_PROFILE: gblack686-hermes-agent
+      LANGUAGE_HINT: node
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: package-lock.json
+    - name: Install dependencies
+      run: npm ci
+    - name: Run build command
+      run: npm run --prefix apps/desktop build
+'on':
+  workflow_call: null
